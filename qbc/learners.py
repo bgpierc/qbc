@@ -6,9 +6,19 @@ from scipy import stats
 from sklearn.ensemble import AdaBoostClassifier, AdaBoostRegressor
 
 class ActiveLearner(object):
-    def __init__(self, base_learner, m_samples = 10, dtype = 'discrete',):
+    def __init__(self, base_learner, dtype = 'discrete'):
+        """
+        Base class for active learning model
+
+        Parameters
+        ----------
+        base_learner: sklearn.BaseEstimator
+            Model that implements a `fit` and `predict` method like the sklearn API
+        dtype: str
+            Type of the input data. Assumed continuous if `dtype != 'discrete'`
+
+        """
         self.base_learner = base_learner
-        self.m_samples = m_samples
         self.ensemble = []
         self.dtype = dtype
     
@@ -16,11 +26,27 @@ class ActiveLearner(object):
         raise NotImplementedError("This is the base class for Active Learning and as such does not implement a fit method")
     
     def predict(self, X, models = None):
+        """
+        Using the ensemble, make predictions
+
+        Parameters
+        ----------
+        X: np.array
+            Data in the form (n_samples, m_features)
+        models: list
+            If not operating on self, a list of models
+        
+        
+        Returns
+        -------
+        preds: np.array
+            (n_samples, 1) numpy array of the model predictions
+            
+        """
         preds_mat = []
         if models is None:
             models = self.ensemble
         if len(models) == 1:
-            #print('only 1 model')
             return models[0].predict(X)
         for model in models:
             preds_model = model.predict(X)
@@ -33,10 +59,40 @@ class ActiveLearner(object):
             return np.mean(preds_mat, axis = 0)
     
     def disagreement(self, votes):
+        """
+        Entropy based disagreement function
+
+        Parameters
+        ----------
+        votes: np.array
+            The predictions of individual models
+            
+        Returns
+        -------
+        disagree: numeric
+            The disagreement of the models based on Shannon's entropy
+            
+
+        """
         value,counts = np.unique(votes, return_counts=True)
         return entropy(counts, base=2)
     
     def mean_disagreement(self, votes):
+        """
+        Mean based disagreement function
+
+        Parameters
+        ----------
+        votes: np.array
+            The predictions of individual models
+            
+        Returns
+        -------
+        disagree: numeric
+            The disagreement of the models based on absolute difference from the mean
+
+        """
+        
         return np.max(np.abs(np.mean(votes)-votes))
     
     def select_sample(self, potential_to_query, corpus):
@@ -64,7 +120,7 @@ class QBag(ActiveLearner):
         
     def fit(self, X, y, allowed_samples = 10, num_models = 5,  **kwargs):
         """
-        Implements QBag from Abe and Mamitsuka (1998)
+        Fits QBag from Abe and Mamitsuka (1998)
 
         Parameters
         ----------
@@ -74,11 +130,8 @@ class QBag(ActiveLearner):
             The number of samples the learner is allowed to query The default is 10.
         num_models : int, optional
             The number of models to train in the committee. The default is 5.
-
-        Returns
-        -------
-        models : list
-            A list of sklearn model objects from the final iteration, trained on allowed_samples examples.
+        kwargs: dict
+            Additional keyword arguements to be passed to the base learner.
 
         """
         data = np.hstack((X, y[:, np.newaxis]))
@@ -96,7 +149,7 @@ class QBag(ActiveLearner):
                 self.ensemble.append(model)
 
             potential_to_query = query_points[np.random.randint(query_points.shape[0],
-                                                                size=self.m_samples), :]
+                                                                size=allowed_samples), :]
             corpus = self.select_sample(potential_to_query, corpus)
             
             
@@ -104,6 +157,21 @@ class QBoost(ActiveLearner):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     def fit(self,X, y, allowed_samples = 10, num_models = 5, **kwargs):
+        """
+        Fits QBoost
+
+        Parameters
+        ----------
+        X,y : numpy array
+            The data matrices
+        allowed_samples : int, optional
+            The number of samples the learner is allowed to query The default is 10.
+        num_models : int, optional
+            The number of models to train in the committee. The default is 5.
+        kwargs: dict
+            Additional keyword arguements to be passed to the base learner.
+
+        """
         data = np.hstack((X, y[:, np.newaxis]))
         corpus = data[:1]
         query_points = data[1:]
@@ -123,7 +191,7 @@ class QBoost(ActiveLearner):
                 self.ensemble.append(clf)
 
             potential_to_query = query_points[np.random.randint(query_points.shape[0],
-                                                                size=self.m_samples), :] # TODO what should the query size be?
+                                                                size=allowed_samples), :] # TODO what should the query size be?
             corpus = self.select_sample(potential_to_query, corpus)
             
             
@@ -131,7 +199,24 @@ class ACTIVE_DECORATE(ActiveLearner):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     
-    def fit(self, X, y, allowed_samples = 100, num_models = 5,begin_labels = 10):
+    def fit(self, X, y, allowed_samples = 100, num_models = 5,begin_labels = 10, **kwargs):
+        """
+        Fits ACTIVE_DECORATE
+
+        Parameters
+        ----------
+        X,y : numpy array
+            The data matrices
+        allowed_samples : int, optional
+            The number of samples the learner is allowed to query The default is 10.
+        num_models : int, optional
+            The number of models to train in the committee. The default is 5.
+        begin_labels: int
+            Number of samples to start with. 
+        kwargs: dict
+            Additional keyword arguements to be passed to the base learner.
+
+        """
         data = np.hstack((X, y[:, np.newaxis]))
         corpus = data[:begin_labels]
         query_points = data[begin_labels:]
@@ -139,7 +224,7 @@ class ACTIVE_DECORATE(ActiveLearner):
         for i in range(1,allowed_samples):
             models = self.DECORATE(corpus)
             potential_to_query = query_points[np.random.randint(query_points.shape[0],
-                                                                size=self.m_samples), :] 
+                                                                size=allowed_samples), :] 
             corpus = self.select_sample(potential_to_query, corpus)
             self.ensemble = models
     
@@ -174,28 +259,19 @@ class ACTIVE_DECORATE(ActiveLearner):
 
             # this may not be exactly what they described, but I think it makes the most sense
             # in the binary classification context
-            #print(R.shape)
-            
             labels = []
             for sample in R:
-                #pred = bagging_predict(sample,C)
-                #pred = self.predict(sample[:])
-                pred = self.predict(sample.reshape(1, -1), models = C).item()
-                #print(pred.shape)
                 if self.dtype == 'discrete':
                     I = lambda xt: 0.0 if xt == 1 else 1.0
                     fp = I(pred)
-                
-                # if not(pred == 0.0 or pred == 1.0):
-                #     print(f'R_n: {R.shape[0]}  pred {pred} fp {fp} type {type(pred)}')
                     
                 labels.append(fp)
-                #labels.append(1-pred)
+
             T_old = T
             labels = np.array(labels)
             arr_new = np.append(R,labels.reshape(-1,1), axis = 1)
             T_new = np.append(T,arr_new, axis = 0)
-            #print(f'Shape of T_new {T_new.shape}')
+
             C_prime = self.base_learner(**kwargs)
             
             y_train_C = T_new[:,-1]
@@ -223,7 +299,6 @@ class ACTIVE_DECORATE(ActiveLearner):
     
     def predict_dec(sample,):
         num_models = len(decorate)
-        #print(num_models)
         p_0 = 0
         p_1 = 0
         for model in self.ensemble:
@@ -259,10 +334,28 @@ class ACTIVE_DECORATE(ActiveLearner):
     
     
 class jackAL(ActiveLearner):
+    
     def __init__(self, *args, k = 1, **kwargs):
         super().__init__(*args, **kwargs)
         self.k = k
     def fit(self, X,y, schedule = None, allowed_samples = 100, num_models = 5, k = 1):
+        """
+        Fits jackAL, an original AL method based on the jackknife
+
+        Parameters
+        ----------
+        X,y : numpy array
+            The data matrices
+        k: int
+            Number of items in each bag, default 1 for original jackknife
+        schedule: function
+            The annealing schedule for `k`
+        allowed_samples : int, optional
+            The number of samples the learner is allowed to query The default is 10.
+        num_models : int, optional
+            The number of models to train in the committee. The default is 5.
+
+        """
         data = np.hstack((X, y[:, np.newaxis]))
         corpus = data[:2]
         query_points = data[2:]
@@ -274,7 +367,7 @@ class jackAL(ActiveLearner):
             else:
                 raise Exception("invalid args")
             potential_to_query = query_points[np.random.randint(query_points.shape[0],
-                                                                size=self.m_samples), :]
+                                                                size=allowed_samples), :]
             corpus = self.select_sample(potential_to_query, corpus)
     
     def _jackknife(self,data):
@@ -296,7 +389,6 @@ class jackAL(ActiveLearner):
             if schedule is None:
                 bag = data[np.random.randint(data.shape[0], size=len(data) - k), :]
             else:
-                #print('bagsz')
                 bag = data[np.random.randint(data.shape[0], size=len(data) - int(schedule(len(data)))), :] 
             model = self.base_learner()
             y_train = bag[:,-1]
