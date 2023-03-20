@@ -3,7 +3,13 @@ QBC Active Learning is a method used to increase sample efficency in situations 
 
 Three methods from the literature (`QBag`, `QBoost`, `ACTIVE-DECORATE`), as well as one original approach (`jackAL`) based on the jackknife are implemented currently. Modifications and extensions to the articles are proposed and explained in the accompanying paper. 
 
+
 ![performance on the breast cancer dataset](cancer.PNG)
+
+# Installation
+`pip install qbc==0.0.1`
+
+Or browse releases on PyPi: https://pypi.org/project/qbc/0.0.1/
 
 # Abstract: 
 
